@@ -12,6 +12,7 @@ import (
 func main() {
 	if _, ok := os.LookupEnv("DEBUG"); ok {
 		log.SetLevel(log.DebugLevel)
+		log.SetReportCaller(true)
 	} else {
 		log.SetLevel(log.InfoLevel)
 	}
@@ -25,6 +26,7 @@ func main() {
 	shutdown.OnSignal(0, os.Interrupt, syscall.SIGTERM)
 	shutdown.SetTimeout(time.Second * 10)
 	shut := shutdown.Second()
+
 	<-shut
 	log.Info("Exited")
 }

@@ -4,9 +4,12 @@ import (
 	shutdown "github.com/klauspost/shutdown2"
 	log "github.com/sirupsen/logrus"
 	"net"
+	"sync"
 )
 
 var tcpPort = ":3000"
+
+var connectedPlayer sync.Map
 
 func TCPServer() {
 	tcpAddr, err := net.ResolveTCPAddr("tcp4", tcpPort)
@@ -20,7 +23,7 @@ func TCPServer() {
 		log.Println(err)
 	}
 
-	tcpConnections := make(chan net.TCPConn)
+	tcpConnCh := make(chan net.TCPConn)
 
 	go func() {
 		log.Printf("TCP server starts %s\n", tcpListener.Addr().String())
@@ -29,7 +32,7 @@ func TCPServer() {
 			if err != nil {
 				log.Println(err)
 			}
-			tcpConnections <- *c
+			tcpConnCh <- *c
 		}
 	}()
 
@@ -37,12 +40,14 @@ func TCPServer() {
 
 	for {
 		select {
-		case conn := <-tcpConnections:
-			player := Player{TcpConn: &conn}
-			go player.HandleClient()
+		case tcpConn := <-tcpConnCh:
+			go NewPlayer(tcpConn).HandleClient()
 		case shut := <-notifier:
+			_ = tcpListener.Close()
+			close(tcpConnCh)
 			close(shut)
 			log.Print("TCP server closed")
+			return
 		}
 	}
 }
