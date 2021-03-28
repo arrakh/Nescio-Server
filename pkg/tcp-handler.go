@@ -1,12 +1,13 @@
 package pkg
 
 import (
+	"bytes"
+	"encoding/binary"
 	"encoding/json"
 	"github.com/google/uuid"
 	log "github.com/sirupsen/logrus"
 	"io"
 	"net"
-	"strings"
 	"time"
 )
 
@@ -16,25 +17,32 @@ func (player Player) HandleClient() {
 		log.WithField("id", player.ID).Debugln("tcp handler exited")
 	}()
 
-	player.setDeadline()
-
-	decoder := json.NewDecoder(player.TcpConn)
-	encoder := json.NewEncoder(player.TcpConn)
-
-	authCh := make(chan TcpData)
+	authCh := make(chan Login)
 	pingCh := make(chan bool)
 
 	go func() {
 		for {
-			var tcpData TcpData
-
-			err := decoder.Decode(&tcpData)
+			buffer := make([]byte, BUFFER)
+			n, err := player.TcpConn.Read(buffer)
 			if err != nil {
 				player.errCh <- err
-			} else if len(tcpData.Username) > 0 && len(tcpData.Password) > 0 {
-				authCh <- tcpData
-			} else if len(tcpData.Message) > 0 && strings.ToLower(tcpData.Message) == "ping" {
+				continue
+			}
+			commandEnum := binary.LittleEndian.Uint32(buffer[0:4])
+			log.WithField("player", player.Username).Debugf("command from player: %d", commandEnum)
+			switch commandEnum {
+			case PING:
 				pingCh <- true
+			case LOGIN:
+				var login Login
+				if err := json.Unmarshal(buffer[16:n], &login); err != nil {
+					b, _ := json.Marshal(ClientData{CommandEnum: LOGIN})
+					if _, err = player.TcpConn.Write(b); err != nil {
+						player.errCh <- err
+					}
+				} else {
+					authCh <- login
+				}
 			}
 		}
 	}()
@@ -45,35 +53,70 @@ func (player Player) HandleClient() {
 			log.WithField("player", player.Username).Debug(err)
 			if netErr, ok := err.(net.Error); (ok && netErr.Timeout()) || err == io.EOF {
 				_ = player.TcpConn.Close()
-				connectedPlayer.Delete(player.Username)
-				log.WithField("player", player.Username).Error("disconnected")
+				connectedPlayer.Delete(player.ID)
+				log.WithField("playerID", player.ID).Error("disconnected")
 				return
 			}
-		case authenticated := <-authCh:
+		case login := <-authCh:
 			// TODO query from database or redis
-			if authenticated.Username == "fahim" && authenticated.Password == "fahim" {
+			if (login.Username == "fahim" && login.Password == "fahim") ||
+				(login.Username == "arrakh" && login.Password == "arrakh") {
+				// give new id
 				player.ID = uuid.New().ID()
-				player.Username = authenticated.Username
+				player.Username = login.Username
 				log.WithField("player", player.Username).Println("login success")
-				if err := encoder.Encode(TcpData{Username: player.Username, ID: player.ID}); err != nil {
-					player.errCh <- io.EOF
-					continue
+				// set buffer
+				buffer := new(bytes.Buffer)
+				// write to buffer
+				err := binary.Write(buffer, binary.LittleEndian, ServerData{CommandEnum: LOGIN})
+				if err != nil {
+					log.Debugln(err)
 				}
-				if existingPlayer, ok := connectedPlayer.LoadOrStore(player.Username, player); ok {
-					log.WithField("player", player.Username).Printf("disconnect previous id %d\n", existingPlayer.(Player).ID)
-					_ = existingPlayer.(Player).TcpConn.Close()
-					log.WithField("player", player.Username).Debugf("%v\n", existingPlayer.(Player).UdpConn)
-					//_ = existingPlayer.(Player).UdpConn.Close()
-					existingPlayer.(Player).errCh <- io.EOF
-					connectedPlayer.Store(player.Username, player)
+				err = binary.Write(buffer, binary.LittleEndian, player.ID)
+				if err != nil {
+					log.Debugln(err)
+				}
+				if _, err = player.TcpConn.Write(buffer.Bytes()); err != nil {
+					player.errCh <- err
+				} else {
+					var existingPlayerID uint32
+					connectedPlayer.Range(func(key, value interface{}) bool {
+						if value.(Player).Username == player.Username {
+							log.WithField("player", player.Username).Debugf("found previous id %d\n", value.(Player).ID)
+							existingPlayerID = value.(Player).ID
+							return false
+						}
+						return true
+					})
+					if existingPlayerID != 0 {
+						if existingPlayer, ok := connectedPlayer.Load(existingPlayerID); ok {
+							log.WithField("player", player.Username).Debugf("disconnect previous id %d\n", existingPlayerID)
+							existingPlayer.(Player).errCh <- io.EOF
+						}
+					}
+					connectedPlayer.Store(player.ID, player)
 				}
 				player.setDeadline()
 			} else {
-				player.errCh <- io.EOF
+				// set buffer
+				buffer := new(bytes.Buffer)
+				// write to buffer
+				err := binary.Write(buffer, binary.LittleEndian, ServerData{CommandEnum: LOGIN})
+				if err != nil {
+					log.Debugln(err)
+				}
+				err = binary.Write(buffer, binary.LittleEndian, player.ID)
+				if err != nil {
+					log.Debugln(err)
+				}
+				if _, err = player.TcpConn.Write(buffer.Bytes()); err != nil {
+					player.errCh <- err
+				}
 			}
 		case <-pingCh:
 			log.WithField("player", player.Username).Debugln("ping")
-			if err := encoder.Encode(TcpData{Message: "pong"}); err != nil {
+			buffer := new(bytes.Buffer)
+			if err := binary.Write(buffer, binary.LittleEndian, ServerData{CommandEnum: PING}); err != nil {
 				player.errCh <- err
 			} else {
 				log.WithField("player", player.Username).Debugln("pong")
@@ -84,7 +127,7 @@ func (player Player) HandleClient() {
 }
 
 func (player Player) setDeadline() {
-	if err := player.TcpConn.SetDeadline(time.Now().Add(5 * time.Second)); err != nil {
+	if err := player.TcpConn.SetDeadline(time.Now().Add(DEADLINE * time.Second)); err != nil {
 		player.errCh <- err
 	}
 }

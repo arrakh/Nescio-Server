@@ -2,6 +2,17 @@ package pkg
 
 import (
 	"net"
+	"sync"
+)
+
+var connectedPlayer sync.Map
+
+// TODO will be put inside config.ini file
+const (
+	BUFFER      = 1024
+	TCP_ADDRESS = ":3000"
+	UDP_ADDRESS = ":3001"
+	DEADLINE    = 30
 )
 
 type Player struct {
@@ -13,18 +24,31 @@ type Player struct {
 	udpDataCh chan []byte
 }
 
-type TcpData struct {
-	ID       uint32 `json:"id,omitempty"`
+type Login struct {
 	Username string `json:"username,omitempty"`
 	Password string `json:"password,omitempty"`
-	Success  bool   `json:"success,omitempty"`
-	Message  string `json:"message,omitempty"`
 }
 
-type UdpData struct {
-	ID        uint32
-	Timestamp int64
-	Command   int32
+const (
+	PING = iota
+	LOGIN
+	CHAR_MOVE
+	CHAR_ATTACK
+)
+
+type ClientData struct {
+	CommandEnum uint32
+	ID          uint32
+	Timestamp   int64
+}
+
+type ServerData struct {
+	CommandEnum uint32
+	Counter     int32
+}
+
+type PingPongData struct {
+	Ping int32
 }
 
 type Vector2 struct {

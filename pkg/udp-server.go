@@ -9,12 +9,10 @@ import (
 	"net"
 )
 
-var udpPort = ":3001"
-
 func UDPServer() {
-	udpAddr, err := net.ResolveUDPAddr("udp4", udpPort)
+	udpAddr, err := net.ResolveUDPAddr("udp4", UDP_ADDRESS)
 	if err != nil {
-		log.Println("UDP server wrong address")
+		log.Println("UDP server wrong address format")
 		shutdown.Exit(1)
 	}
 
@@ -34,7 +32,7 @@ func UDPServer() {
 			if err != nil {
 				log.Debugln(err)
 			}
-			udpData := UdpData{}
+			udpData := ClientData{}
 			data := bytes.NewBuffer(buffer[0:n])
 			log.Debugf("read from %s with length %d: %d", udpClient.String(), n, len(data.String()))
 			if err = binary.Read(data, binary.BigEndian, &udpData); err != nil {
@@ -46,11 +44,6 @@ func UDPServer() {
 			udpDataCh <- buffer[0:n]
 		}
 	}()
-
-	connectedPlayer.Range(func(key, value interface{}) bool {
-
-		return true
-	})
 
 	notifier := shutdown.Second()
 

@@ -4,21 +4,16 @@ import (
 	shutdown "github.com/klauspost/shutdown2"
 	log "github.com/sirupsen/logrus"
 	"net"
-	"sync"
 )
 
-var tcpPort = ":3000"
-
-var connectedPlayer sync.Map
-
 func TCPServer() {
-	tcpAddr, err := net.ResolveTCPAddr("tcp4", tcpPort)
+	tcpAddress, err := net.ResolveTCPAddr("tcp4", TCP_ADDRESS)
 	if err != nil {
-		log.Println("TCP server wrong address")
+		log.Println("TCP server wrong address format")
 		shutdown.Exit(1)
 	}
 
-	tcpListener, err := net.ListenTCP("tcp4", tcpAddr)
+	tcpListener, err := net.ListenTCP("tcp4", tcpAddress)
 	if err != nil {
 		log.Println(err)
 	}
